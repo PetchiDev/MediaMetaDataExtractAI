@@ -16,6 +16,26 @@ use crate::middleware::auth::Claims;
 use serde_json::json;
 use chrono::Utc;
 
+/// Get enriched metadata for an asset
+/// 
+/// I-FR-24: Metadata access and user facing API
+#[utoipa::path(
+    get,
+    path = "/api/metadata/{asset_id}",
+    tag = "Metadata",
+    params(
+        ("asset_id" = Uuid, Path, description = "Asset UUID")
+    ),
+    responses(
+        (status = 200, description = "Metadata retrieved successfully", body = MetadataResponse),
+        (status = 404, description = "Asset not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(
+        ("api_key" = []),
+        ("bearer_auth" = [])
+    )
+)]
 // I-FR-24: Query enriched metadata
 pub async fn get_metadata(
     State(db_pool): State<DbPool>,
@@ -34,6 +54,29 @@ pub async fn get_metadata(
     })))
 }
 
+/// Update asset metadata
+/// 
+/// I-FR-27: Metadata editing and unified input
+/// I-FR-19: Conflict detection - include X-Version-ID header to detect conflicts
+#[utoipa::path(
+    put,
+    path = "/api/metadata/{asset_id}",
+    tag = "Metadata",
+    params(
+        ("asset_id" = Uuid, Path, description = "Asset UUID")
+    ),
+    request_body = MetadataUpdate,
+    responses(
+        (status = 200, description = "Metadata updated successfully", body = MetadataResponse),
+        (status = 409, description = "Conflict detected - version mismatch", body = ErrorResponse),
+        (status = 404, description = "Asset not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(
+        ("api_key" = []),
+        ("bearer_auth" = [])
+    )
+)]
 // I-FR-27: Update metadata with conflict detection
 pub async fn update_metadata(
     State(db_pool): State<DbPool>,
@@ -126,6 +169,29 @@ pub async fn update_metadata(
     })))
 }
 
+/// Resolve metadata conflicts
+/// 
+/// I-FR-19: Conflict resolution and manual review
+/// Used when concurrent edits are detected
+#[utoipa::path(
+    post,
+    path = "/api/metadata/{asset_id}/resolve-conflict",
+    tag = "Metadata",
+    params(
+        ("asset_id" = Uuid, Path, description = "Asset UUID")
+    ),
+    request_body = ConflictResolutionRequest,
+    responses(
+        (status = 200, description = "Conflict resolved successfully", body = MetadataResponse),
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 404, description = "Asset not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(
+        ("api_key" = []),
+        ("bearer_auth" = [])
+    )
+)]
 // I-FR-19: Resolve metadata conflicts
 pub async fn resolve_conflict(
     State(db_pool): State<DbPool>,

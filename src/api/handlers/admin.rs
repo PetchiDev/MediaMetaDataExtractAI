@@ -15,6 +15,22 @@ use crate::db::repositories::{action_repository::ActionRepository, asset_reposit
 use serde_json::json;
 use sqlx::Row;
 
+/// Get controller status and health metrics
+/// 
+/// I-FR-09: Real-time monitoring
+#[utoipa::path(
+    get,
+    path = "/api/admin/controllers/status",
+    tag = "Admin",
+    responses(
+        (status = 200, description = "Controller status retrieved", body = ControllerStatusResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(
+        ("api_key" = []),
+        ("bearer_auth" = [])
+    )
+)]
 // I-FR-09: Get controller status
 pub async fn get_controller_status(
     State(db_pool): State<DbPool>,

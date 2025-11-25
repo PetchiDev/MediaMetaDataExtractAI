@@ -4,8 +4,9 @@
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct MetadataUpdate {
     pub title: Option<String>,
     pub description: Option<String>,
@@ -14,7 +15,7 @@ pub struct MetadataUpdate {
     pub language: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct EnrichedMetadata {
     pub speakers: Option<SpeakerMetadata>,
     pub text_recognition: Option<TextRecognitionMetadata>,

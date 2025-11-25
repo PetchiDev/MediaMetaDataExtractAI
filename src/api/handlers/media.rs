@@ -10,6 +10,7 @@ use axum::{
 use axum_extra::extract::multipart::Multipart;
 use uuid::Uuid;
 use crate::db::DbPool;
+use crate::api::openapi::{MediaSubmitResponse, MediaUploadResponse};
 use crate::db::repositories::{asset_repository::AssetRepository, workflow_repository::WorkflowRepository};
 use crate::models::asset::{Asset, AssetStatus, AssetType, SourceSystem};
 use crate::utils::hash;
@@ -18,6 +19,30 @@ use crate::services::preprocessing_service;
 use chrono::Utc;
 use serde_json::json;
 
+/// Submit media for AI processing (Technical Users)
+/// 
+/// I-FR-29: Media submission and ingestion endpoint
+/// 
+/// Accepts multipart form data with:
+/// - `file`: Media file (video, image, audio, or text)
+/// - `metadata`: JSON metadata (optional)
+/// - `operational_tags`: JSON operational tags for downstream processing (optional)
+#[utoipa::path(
+    post,
+    path = "/api/media/submit",
+    tag = "Media",
+    request_body(content = String, description = "Multipart form data with file, metadata, and operational_tags", content_type = "multipart/form-data"),
+    responses(
+        (status = 202, description = "Media submitted successfully", body = MediaSubmitResponse),
+        (status = 400, description = "Bad request - missing file or invalid data", body = ErrorResponse),
+        (status = 409, description = "Duplicate asset detected", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(
+        ("api_key" = []),
+        ("bearer_auth" = [])
+    )
+)]
 // I-FR-29: Technical user API submission
 pub async fn submit_media(
     State(db_pool): State<DbPool>,
@@ -159,6 +184,26 @@ pub async fn submit_media(
     })))
 }
 
+/// Upload media via UI (Naive Users)
+/// 
+/// I-FR-31: Media upload and ingestion
+/// 
+/// Similar to submit_media but designed for UI-based uploads
+#[utoipa::path(
+    post,
+    path = "/api/media/upload",
+    tag = "Media",
+    request_body(content = String, description = "Multipart form data with file and basic metadata", content_type = "multipart/form-data"),
+    responses(
+        (status = 201, description = "Media uploaded successfully", body = MediaUploadResponse),
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(
+        ("api_key" = []),
+        ("bearer_auth" = [])
+    )
+)]
 // I-FR-31: Naive user manual upload
 pub async fn upload_media(
     State(db_pool): State<DbPool>,
@@ -169,6 +214,26 @@ pub async fn upload_media(
     submit_media(State(db_pool), multipart).await
 }
 
+/// Get media asset information
+/// 
+/// Retrieves asset details by UUID
+#[utoipa::path(
+    get,
+    path = "/api/media/{asset_id}",
+    tag = "Media",
+    params(
+        ("asset_id" = Uuid, Path, description = "Asset UUID")
+    ),
+    responses(
+        (status = 200, description = "Asset found", body = Asset),
+        (status = 404, description = "Asset not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(
+        ("api_key" = []),
+        ("bearer_auth" = [])
+    )
+)]
 pub async fn get_media(
     State(db_pool): State<DbPool>,
     Path(asset_id): Path<Uuid>,

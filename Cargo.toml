@@ -52,5 +52,9 @@ tower_governor = "0.4"
 # Environment variables
 dotenv = "0.15"
 
+# OpenAPI/Swagger UI
+utoipa = { version = "4.2", features = ["axum_extras", "chrono"] }
+utoipa-swagger-ui = { version = "6.0", features = ["axum"] }
+
 # Note: AWS SDK 1.28.0 uses rustls 0.21 which doesn't have aws-lc-rs
 # We don't need to explicitly add rustls - it will be pulled in by dependencies

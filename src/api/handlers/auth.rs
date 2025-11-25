@@ -40,6 +40,33 @@ pub async fn sso_callback(
     })))
 }
 
+/// Generate a new API key
+/// 
+/// I-FR-23: Secure API and access governance
+/// 
+/// **WARNING**: The API key is only returned once. Store it securely.
+#[utoipa::path(
+    post,
+    path = "/api/auth/api-keys",
+    tag = "Auth",
+    request_body(
+        content = serde_json::Value,
+        description = "API key generation request",
+        example = json!({
+            "key_name": "Production Integration Key",
+            "permissions": ["submit:media", "read:metadata"]
+        })
+    ),
+    responses(
+        (status = 201, description = "API key generated successfully", body = ApiKeyResponse),
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(
+        ("api_key" = []),
+        ("bearer_auth" = [])
+    )
+)]
 // I-FR-23: API key management
 pub async fn generate_api_key(
     State(db_pool): State<DbPool>,

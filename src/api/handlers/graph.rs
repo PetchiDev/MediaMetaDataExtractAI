@@ -9,9 +9,38 @@ use axum::{
 };
 use crate::db::DbPool;
 use crate::db::repositories::{graph_repository::GraphRepository, asset_repository::AssetRepository};
-use serde_json::json;
+use serde_json::{json, Value};
 use sqlx::Row;
 
+/// Search assets using graph-based relationships
+/// 
+/// I-FR-22: User friendly search and graph exploration
+/// I-FR-20: Graph indexing
+#[utoipa::path(
+    post,
+    path = "/api/graph/search",
+    tag = "Graph",
+    request_body(
+        content = serde_json::Value,
+        description = "Search query with optional filters",
+        example = json!({
+            "query": "CEO strategy 2025",
+            "filters": {
+                "asset_type": "VIDEO"
+            },
+            "max_results": 50
+        })
+    ),
+    responses(
+        (status = 200, description = "Search results", body = GraphSearchResponse),
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(
+        ("api_key" = []),
+        ("bearer_auth" = [])
+    )
+)]
 // I-FR-22: Graph-based content discovery
 pub async fn search(
     State(db_pool): State<DbPool>,

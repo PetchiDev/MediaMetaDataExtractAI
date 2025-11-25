@@ -13,6 +13,26 @@ use crate::db::repositories::workflow_repository::WorkflowRepository;
 use serde_json::json;
 use sqlx::Row;
 
+/// Get workflow status for an asset
+/// 
+/// I-FR-26: Workflow visibility and status display
+#[utoipa::path(
+    get,
+    path = "/api/workflow/status/{asset_id}",
+    tag = "Workflow",
+    params(
+        ("asset_id" = Uuid, Path, description = "Asset UUID")
+    ),
+    responses(
+        (status = 200, description = "Workflow status retrieved", body = WorkflowStatusResponse),
+        (status = 404, description = "No workflow found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(
+        ("api_key" = []),
+        ("bearer_auth" = [])
+    )
+)]
 // I-FR-26: Get workflow status for asset
 pub async fn get_workflow_status(
     State(db_pool): State<DbPool>,
