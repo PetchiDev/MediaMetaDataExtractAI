@@ -1,0 +1,56 @@
+[package]
+name = "my_api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Web framework
+axum = "0.7"
+axum-extra = { version = "0.9", features = ["multipart"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Database - Using rustls instead of native-tls to avoid aws-lc-sys build issues
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono"] }
+
+# AWS SDK - Use older versions that use rustls 0.21 (no aws-lc-rs)
+# Versions before 1.20 use rustls 0.21
+aws-sdk-s3 = { version = "=1.19.0", default-features = false, features = ["rustls"] }
+aws-sdk-lambda = { version = "=1.19.0", default-features = false, features = ["rustls"] }
+aws-sdk-sfn = { version = "=1.19.0", default-features = false, features = ["rustls"] }  # Step Functions SDK
+aws-config = { version = "=1.0.0", default-features = false, features = ["rustls"] }
+
+# Authentication & Security
+jsonwebtoken = "9.2"
+bcrypt = "0.15"
+
+# Utilities
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Hashing for deduplication (I-FR-02)
+sha2 = "0.10"
+
+# Async trait support
+async-trait = "0.1"
+
+# HTTP client for external APIs - Using rustls to avoid native TLS compilation issues
+reqwest = { version = "0.11", features = ["json", "multipart", "rustls-tls"], default-features = false }
+
+# Rate limiting
+tower_governor = "0.4"
+
+# Environment variables
+dotenv = "0.15"
+
+# Note: AWS SDK 1.28.0 uses rustls 0.21 which doesn't have aws-lc-rs
+# We don't need to explicitly add rustls - it will be pulled in by dependencies
