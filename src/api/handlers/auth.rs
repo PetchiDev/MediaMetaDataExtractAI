@@ -5,37 +5,194 @@
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
-    response::Json,
+    http::{StatusCode, HeaderValue, HeaderMap},
+    response::{Json, Response, IntoResponse},
 };
 use uuid::Uuid;
 use crate::db::DbPool;
 use crate::db::repositories::user_repository::UserRepository;
 use crate::models::user::{ApiKey, ApiKeyStatus, User, UserRole};
+use crate::api::openapi::{GoogleLoginResponse, SSOCallbackResponse};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use chrono::Utc;
 
-// I-FR-21: SSO login
-pub async fn sso_login(
+// I-FR-21: SSO login with Google
+/// Initiates Google Sign-In flow
+/// Returns redirect URL to Google OAuth
+#[utoipa::path(
+    get,
+    path = "/api/auth/google/login",
+    tag = "Auth",
+    responses(
+        (status = 200, description = "Returns Google OAuth redirect URL and callback URL", body = GoogleLoginResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
+pub async fn google_login(
     State(_db_pool): State<DbPool>,
-    Json(_payload): Json<serde_json::Value>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    // TODO: Implement SSO flow with SAML/OIDC
-    // For now, return placeholder
+) -> Result<Response, StatusCode> {
+    use crate::services::google_oauth::GoogleOAuthService;
+    
+    let google_oauth = GoogleOAuthService::new()
+        .map_err(|e| {
+            tracing::error!("Failed to initialize Google OAuth: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    
+    let (auth_url, _csrf_token) = google_oauth.get_authorization_url();
+    
+    // Return redirect URL (frontend will redirect)
+    // Note: In Swagger UI, this returns JSON. In browser, you can redirect directly
     Ok(Json(json!({
-        "redirect_url": "https://login.mediacorp.com/saml/sso",
-        "status": "redirect_required"
-    })))
+        "redirect_url": auth_url.to_string(),
+        "callback_url": "http://localhost:3000/api/auth/google/callback",
+        "status": "redirect_required",
+        "message": "Redirect user to Google Sign-In. After Google auth, user will be redirected to callback_url with code parameter.",
+        "instructions": "1. Copy redirect_url and open in browser\n2. Sign in with Google\n3. Google will redirect to callback_url\n4. Get JWT token from response"
+    })).into_response())
 }
 
-pub async fn sso_callback(
+/// Google OAuth callback handler
+/// Handles Google OAuth callback and generates JWT token
+#[utoipa::path(
+    get,
+    path = "/api/auth/google/callback",
+    tag = "Auth",
+    params(
+        ("code" = String, Query, description = "Authorization code from Google"),
+        ("state" = String, Query, description = "CSRF state token")
+    ),
+    responses(
+        (status = 200, description = "Authentication successful. Returns JWT access_token and refresh_token.", body = SSOCallbackResponse),
+        (status = 400, description = "Missing authorization code", body = ErrorResponse),
+        (status = 401, description = "Invalid authorization code", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
+pub async fn google_callback(
     State(db_pool): State<DbPool>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    // TODO: Handle SSO callback, validate SAML assertion
-    // Create or get user, generate JWT token
+    use crate::services::google_oauth::GoogleOAuthService;
+    
+    // Get authorization code from Google
+    let code = params.get("code")
+        .ok_or_else(|| {
+            tracing::warn!("Missing authorization code in callback");
+            StatusCode::BAD_REQUEST
+        })?;
+    
+    // Initialize Google OAuth service
+    let google_oauth = GoogleOAuthService::new()
+        .map_err(|e| {
+            tracing::error!("Failed to initialize Google OAuth: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    
+    // Exchange code for access token
+    let access_token = google_oauth.exchange_code(code.clone())
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to exchange code for token: {:?}", e);
+            StatusCode::UNAUTHORIZED
+        })?;
+    
+    // Get user info from Google
+    let google_user = google_oauth.get_user_info(&access_token)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to get user info from Google: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    
+    // Use Google ID as SSO provider ID
+    let sso_provider_id = format!("google_{}", google_user.id);
+    
+    // Get or create user
+    let user = match UserRepository::get_by_sso_id(&db_pool, &sso_provider_id).await {
+        Ok(Some(mut existing_user)) => {
+            // Update user info if changed
+            if existing_user.email != google_user.email || existing_user.name != google_user.name {
+                sqlx::query("UPDATE users SET email = $1, name = $2 WHERE id = $3")
+                    .bind(&google_user.email)
+                    .bind(&google_user.name)
+                    .bind(&existing_user.id)
+                    .execute(db_pool.as_ref())
+                    .await
+                    .ok();
+                
+                existing_user.email = google_user.email.clone();
+                existing_user.name = google_user.name.clone();
+            }
+            existing_user
+        }
+        Ok(None) => {
+            // Create new user
+            let new_user = User {
+                id: uuid::Uuid::new_v4(),
+                email: google_user.email.clone(),
+                name: google_user.name.clone(),
+                role: UserRole::Viewer, // Default role
+                sso_provider_id: Some(sso_provider_id.clone()),
+                created_at: chrono::Utc::now(),
+                last_login: None,
+            };
+            
+            UserRepository::create(&db_pool, &new_user).await
+                .map_err(|e| {
+                    tracing::error!("Failed to create user: {:?}", e);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+            
+            new_user
+        }
+        Err(e) => {
+            tracing::error!("Database error: {:?}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+    
+    // Update last login
+    sqlx::query("UPDATE users SET last_login = NOW() WHERE id = $1")
+        .bind(&user.id)
+        .execute(db_pool.as_ref())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    
+    // Generate JWT tokens using JWT service
+    use crate::utils::jwt::JWTService;
+    
+    let token = JWTService::generate_access_token(
+        &user.id.to_string(),
+        &user.email,
+        &format!("{:?}", user.role),
+    ).map_err(|e| {
+        tracing::error!("Failed to generate access token: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    
+    let refresh_token = JWTService::generate_refresh_token(
+        &user.id.to_string(),
+        &user.email,
+        &format!("{:?}", user.role),
+    ).map_err(|e| {
+        tracing::error!("Failed to generate refresh token: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    
     Ok(Json(json!({
-        "access_token": "placeholder_token",
+        "access_token": token,
+        "refresh_token": refresh_token,
+        "token_type": "Bearer",
+        "expires_in": 86400, // 24 hours
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "role": format!("{:?}", user.role),
+            "picture": google_user.picture
+        },
         "status": "success"
     })))
 }

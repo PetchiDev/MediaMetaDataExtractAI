@@ -10,7 +10,6 @@ use axum::{
 };
 use crate::db::DbPool;
 use crate::db::repositories::user_repository::UserRepository;
-use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -30,35 +29,40 @@ pub async fn authenticate(
     // Check for Authorization header
     let auth_header = headers.get("Authorization")
         .and_then(|h| h.to_str().ok())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+        .ok_or_else(|| {
+            tracing::warn!("Missing Authorization header");
+            StatusCode::UNAUTHORIZED
+        })?;
 
-    // Check if it's a Bearer token (SSO) or API key
+    // Get database pool from extensions (set by state)
+    let db_pool = request.extensions()
+        .get::<Arc<DbPool>>()
+        .ok_or_else(|| {
+            tracing::error!("Database pool not found in request extensions");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    // Check if it's a Bearer token (SSO/JWT) or API key
     if auth_header.starts_with("Bearer ") {
         let token = auth_header.strip_prefix("Bearer ").unwrap();
         
-        // Validate JWT token (I-FR-21: SSO)
-        let secret = std::env::var("JWT_SECRET")
-            .unwrap_or_else(|_| "change-me-in-production".to_string());
+        // Validate JWT token using JWT service
+        use crate::utils::jwt::JWTService;
         
-        let decoding_key = DecodingKey::from_secret(secret.as_ref());
-        let validation = Validation::new(Algorithm::HS256);
-        
-        match decode::<Claims>(token, &decoding_key, &validation) {
-            Ok(token_data) => {
+        match JWTService::validate_token(token) {
+            Ok(claims) => {
                 // Add user info to request extensions
-                request.extensions_mut().insert(token_data.claims);
+                request.extensions_mut().insert(claims);
                 Ok(next.run(request).await)
             }
-            Err(_) => Err(StatusCode::UNAUTHORIZED),
+            Err(e) => {
+                tracing::warn!("JWT validation failed: {:?}", e);
+                Err(StatusCode::UNAUTHORIZED)
+            }
         }
     } else if auth_header.starts_with("ApiKey ") {
         // I-FR-23: API key validation
         let api_key = auth_header.strip_prefix("ApiKey ").unwrap();
-        
-        // Get database pool from extensions (set by state)
-        let db_pool = request.extensions()
-            .get::<Arc<DbPool>>()
-            .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
         
         // Hash the provided key and check against database
         use sha2::{Digest, Sha256};
@@ -68,26 +72,47 @@ pub async fn authenticate(
         
         match UserRepository::get_api_key_by_hash(db_pool, &key_hash).await {
             Ok(Some(api_key_record)) => {
-                // Update last_used timestamp
-                // TODO: Update last_used in database
+                // Update last_used timestamp - use double deref to get &Pool from Arc<Pool>
+                let pool: &sqlx::PgPool = &**db_pool;
+                sqlx::query("UPDATE api_keys SET last_used = NOW() WHERE id = $1")
+                    .bind(&api_key_record.id)
+                    .execute(pool)
+                    .await
+                    .ok(); // Don't fail if update fails
                 
                 // Get user and add to request extensions
-                if let Ok(Some(user)) = UserRepository::get_by_id(db_pool, api_key_record.user_id).await {
-                    let claims = Claims {
-                        user_id: user.id.to_string(),
-                        email: user.email.clone(),
-                        role: format!("{:?}", user.role),
-                        exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
-                    };
-                    request.extensions_mut().insert(claims);
-                    Ok(next.run(request).await)
-                } else {
-                    Err(StatusCode::UNAUTHORIZED)
+                match UserRepository::get_by_id(&db_pool, api_key_record.user_id).await {
+                    Ok(Some(user)) => {
+                        let claims = Claims {
+                            user_id: user.id.to_string(),
+                            email: user.email.clone(),
+                            role: format!("{:?}", user.role),
+                            exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+                        };
+                        request.extensions_mut().insert(claims);
+                        Ok(next.run(request).await)
+                    }
+                    Ok(None) => {
+                        tracing::warn!("User not found for API key");
+                        Err(StatusCode::UNAUTHORIZED)
+                    }
+                    Err(e) => {
+                        tracing::error!("Database error: {:?}", e);
+                        Err(StatusCode::INTERNAL_SERVER_ERROR)
+                    }
                 }
             }
-            _ => Err(StatusCode::UNAUTHORIZED),
+            Ok(None) => {
+                tracing::warn!("Invalid API key");
+                Err(StatusCode::UNAUTHORIZED)
+            }
+            Err(e) => {
+                tracing::error!("Database error: {:?}", e);
+                Err(StatusCode::INTERNAL_SERVER_ERROR)
+            }
         }
     } else {
+        tracing::warn!("Invalid Authorization header format");
         Err(StatusCode::UNAUTHORIZED)
     }
 }

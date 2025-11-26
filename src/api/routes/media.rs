@@ -14,6 +14,9 @@ pub fn create_media_routes(db_pool: DbPool) -> Router {
         .route("/api/media/submit", post(crate::api::handlers::media::submit_media))
         // I-FR-31: Manual upload via UI (naive users)
         .route("/api/media/upload", post(crate::api::handlers::media::upload_media))
+        // Get asset metadata
         .route("/api/media/:asset_id", get(crate::api::handlers::media::get_media))
+        // Download/Stream actual file (Video, Audio, Image, Text)
+        .route("/api/media/:asset_id/download", get(crate::api::handlers::media::download_media))
         .with_state(db_pool)
 }

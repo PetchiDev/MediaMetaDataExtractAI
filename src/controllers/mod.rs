@@ -4,7 +4,9 @@
 pub mod ingress;
 pub mod egress;
 pub mod base;
+pub mod local_ingress;
 
 pub use ingress::*;
 pub use egress::*;
 pub use base::*;
+pub use local_ingress::*;

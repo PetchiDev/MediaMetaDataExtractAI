@@ -11,9 +11,9 @@ use crate::db::DbPool;
 
 pub fn create_auth_routes(db_pool: DbPool) -> Router {
     Router::new()
-        // I-FR-21: SSO authentication
-        .route("/api/auth/sso/login", post(crate::api::handlers::auth::sso_login))
-        .route("/api/auth/sso/callback", get(crate::api::handlers::auth::sso_callback))
+        // I-FR-21: Google Sign-In
+        .route("/api/auth/google/login", get(crate::api::handlers::auth::google_login))
+        .route("/api/auth/google/callback", get(crate::api::handlers::auth::google_callback))
         // I-FR-23: API key management
         .route("/api/access/keys", post(crate::api::handlers::auth::generate_api_key))
         .route("/api/access/keys", get(crate::api::handlers::auth::list_api_keys))

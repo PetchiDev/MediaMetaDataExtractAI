@@ -14,16 +14,25 @@ use crate::models::workflow::ProcessingJob;
 #[derive(OpenApi)]
 #[openapi(
     paths(
+        // Auth endpoints
+        crate::api::handlers::auth::google_login,
+        crate::api::handlers::auth::google_callback,
+        crate::api::handlers::auth::generate_api_key,
+        // Media endpoints
         crate::api::handlers::media::submit_media,
         crate::api::handlers::media::upload_media,
         crate::api::handlers::media::get_media,
+        crate::api::handlers::media::download_media,
+        // Metadata endpoints
         crate::api::handlers::metadata::get_metadata,
         crate::api::handlers::metadata::update_metadata,
         crate::api::handlers::metadata::resolve_conflict,
+        // Workflow endpoints
         crate::api::handlers::workflow::get_workflow_status,
+        // Graph endpoints
         crate::api::handlers::graph::search,
+        // Admin endpoints
         crate::api::handlers::admin::get_controller_status,
-        crate::api::handlers::auth::generate_api_key,
     ),
     components(schemas(
         Asset,
@@ -38,6 +47,8 @@ use crate::models::workflow::ProcessingJob;
         GraphSearchResponse,
         ControllerStatusResponse,
         ApiKeyResponse,
+        GoogleLoginResponse,
+        SSOCallbackResponse,
         ErrorResponse,
     )),
     modifiers(&SecurityAddon),
@@ -145,6 +156,25 @@ pub struct ApiKeyResponse {
     pub key_id: String,
     pub expires_in: String,
     pub warning: String,
+}
+
+#[derive(utoipa::ToSchema)]
+pub struct GoogleLoginResponse {
+    pub redirect_url: String,
+    pub callback_url: String,
+    pub status: String,
+    pub message: String,
+    pub instructions: String,
+}
+
+#[derive(utoipa::ToSchema)]
+pub struct SSOCallbackResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub token_type: String,
+    pub expires_in: i64,
+    pub user: serde_json::Value,
+    pub status: String,
 }
 
 #[derive(utoipa::ToSchema)]
