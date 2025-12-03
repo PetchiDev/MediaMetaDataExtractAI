@@ -169,6 +169,26 @@ impl AssetRepository {
         Ok(())
     }
 
+    // Update entire asset (for AI processing results)
+    pub async fn update(pool: &DbPool, asset: &Asset) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE assets
+            SET enriched_metadata = $1, status = $2, processing_completed_at = $3, updated_at = $4
+            WHERE uuid = $5
+            "#
+        )
+        .bind(&asset.enriched_metadata)
+        .bind(&asset.status)
+        .bind(&asset.processing_completed_at)
+        .bind(Utc::now())
+        .bind(&asset.uuid)
+        .execute(pool.as_ref())
+        .await?;
+
+        Ok(())
+    }
+
     // I-FR-13: Rollback to previous version
     pub async fn rollback_to_version(
         pool: &DbPool,
